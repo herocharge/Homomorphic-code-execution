@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <vector>
 #include <cmath>
+#include <time.h>
 
 using namespace std;
 using namespace seal;
@@ -162,11 +163,11 @@ int main(){
     
     vector<Ciphertext> code;
     std::string code_plain = "++++++++[>++++++++<-]>+.";
-    code_plain = ">+>+>->->><<<<<<";
+    code_plain = "+[.-]>.";
     for(char c : code_plain)
         code.push_back(homo->enc(c));
     cout << homo->dec(homo->at(code, homo->enc(5))).to_string() << endl;
-    int iterations = 100;
+    int iterations = 10;
     // > 0 
     // < 1
     // + 2
@@ -179,43 +180,110 @@ int main(){
     auto pc = homo->enc(0);
     auto tape_ptr = homo->enc(0);
     const auto END = homo->enc(tape.size() - 1);
+    const auto CODE_END = homo->enc(code.size() - 1);
     const auto START = homo->enc(0);
-    while(iterations--){
-        cout << "ITER::" << 100 - iterations << endl;
+
+    for(int it = 0; it < iterations; it++){
+        time_t start_time = time(0);
+        cout << "ITER::" << it << endl;
         auto curr_op = homo->at(code, pc);
-        
+        auto output = homo->enc(0);
+
+        cout << "Handling >" << endl;
         /// >
         auto update_mask = homo->isEqual(curr_op, homo->enc('>'));
         update_mask = homo->mul(update_mask, homo->notEqual(END, pc));
-        pc = homo->add(pc, homo->mul(homo->enc(1), update_mask));
         tape_ptr = homo->add(tape_ptr, homo->mul(homo->enc(1), update_mask));
-        homo->refresh(pc);
         homo->refresh(tape_ptr);
         
+        cout << "Handling <" << endl;
         /// <
         update_mask = homo->isEqual(curr_op, homo->enc('<'));
         update_mask = homo->mul(update_mask, homo->notEqual(START, pc));
-        pc = homo->add(pc, homo->mul(homo->enc(1), update_mask));
         tape_ptr = homo->sub(tape_ptr, homo->mul(homo->enc(1), update_mask));
-        homo->refresh(pc);
         homo->refresh(tape_ptr);
         
-        
+        cout << "Handling +" << endl;
         /// +
         update_mask = homo->isEqual(curr_op, homo->enc('+'));
         homo->inc_at(tape, tape_ptr, update_mask);
-        pc = homo->add(pc, homo->mul(homo->enc(1), update_mask));
-        homo->refresh(pc);
 
+        cout << "Handling -" << endl;
         /// -
         update_mask = homo->isEqual(curr_op, homo->enc('-'));
         homo->red_at(tape, tape_ptr, update_mask);
-        pc = homo->add(pc, homo->mul(homo->enc(1), update_mask));
-        homo->refresh(pc);
+        
+        cout << "Handling ." << endl;
+        /// .
+        update_mask = homo->isEqual(curr_op, homo->enc('.'));
+        output = homo->add(output, homo->mul(update_mask, homo->at(tape, tape_ptr)));
 
+        /// TODO: take input (,)
+        
+        cout << "Handling [" << endl;
+        /// [
+        update_mask = homo->isEqual(curr_op, homo->enc('['));
+        update_mask = homo->mul(update_mask, homo->isEqual(homo->at(tape, tape_ptr), homo->enc(0)));
+        auto loop = homo->enc(1);
+        auto is_gte = homo->enc(0);
+        for(int i = 0; i < code.size(); i++){
+            is_gte = homo->add(is_gte, homo->isEqual(pc, homo->enc(i)));
+            auto is_loop_gtz = homo->notEqual(loop, homo->enc(0));
+            pc = homo->add(pc, 
+                homo->mul(
+                    update_mask,
+                    homo->mul(is_gte, is_loop_gtz)));
+
+            auto is_open = homo->isEqual(code[i], homo->enc('['));
+            auto is_close = homo->isEqual(code[i], homo->enc(']'));
+            
+            is_open = homo->mul(is_open, is_loop_gtz);
+            is_close = homo->mul(is_close, is_loop_gtz);
+
+            loop = homo->add(loop, is_open);
+            loop = homo->sub(loop, is_close);
+
+            homo->refresh(pc);
+            homo->refresh(loop);
+        }
+
+        cout << "Handling ]" << endl;
+        /// ]
+        update_mask = homo->isEqual(curr_op, homo->enc(']'));
+        update_mask = homo->mul(update_mask, homo->notEqual(homo->at(tape, tape_ptr), homo->enc(0)));
+        loop = homo->enc(1);
+        auto is_lte = homo->enc(0);
+        for(int i = code.size() - 1; i >= 0; i--){
+            is_lte = homo->add(is_lte, homo->isEqual(pc, homo->enc(i)));
+            auto is_loop_gtz = homo->notEqual(loop, homo->enc(0));
+            pc = homo->sub(pc, 
+                homo->mul(
+                    update_mask,
+                    homo->mul(is_lte, is_loop_gtz)));
+
+            auto is_open = homo->isEqual(code[i], homo->enc('['));
+            auto is_close = homo->isEqual(code[i], homo->enc(']'));
+            
+            is_open = homo->mul(is_open, is_loop_gtz);
+            is_close = homo->mul(is_close, is_loop_gtz);
+
+            loop = homo->sub(loop, is_open);
+            loop = homo->add(loop, is_close);
+
+            homo->refresh(pc);
+            homo->refresh(loop);
+        }
+
+        pc = homo->add(pc, homo->notEqual(pc, CODE_END));
+        
+        time_t end_time = time(0);
+
+        cout << "Time takem: " << end_time - start_time << " seconds" << endl;
         cout << "PC::" << homo->dec(pc).to_string() << endl;
         cout << "TAPE_PTR::" << homo->dec(tape_ptr).to_string() << endl;
-        cout << "TAPE_VAL::" << homo->dec(homo->at(tape, tape_ptr)).to_string() << endl;
+        cout << "OUTPUT::" << homo->dec(output).to_string() << endl;
+        cout << endl;
+        cout << endl;
     }
 
 }
